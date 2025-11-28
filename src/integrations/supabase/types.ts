@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_logs: {
+        Row: {
+          action_type: Database["public"]["Enums"]["action_type"]
+          created_at: string
+          description: string | null
+          id: string
+          ip_address: string | null
+          new_values: Json | null
+          old_values: Json | null
+          record_id: string | null
+          table_name: string
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action_type: Database["public"]["Enums"]["action_type"]
+          created_at?: string
+          description?: string | null
+          id?: string
+          ip_address?: string | null
+          new_values?: Json | null
+          old_values?: Json | null
+          record_id?: string | null
+          table_name: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action_type?: Database["public"]["Enums"]["action_type"]
+          created_at?: string
+          description?: string | null
+          id?: string
+          ip_address?: string | null
+          new_values?: Json | null
+          old_values?: Json | null
+          record_id?: string | null
+          table_name?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -74,6 +116,17 @@ export type Database = {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
+      action_type:
+        | "venta_creada"
+        | "venta_cancelada"
+        | "producto_creado"
+        | "producto_actualizado"
+        | "producto_eliminado"
+        | "ajuste_inventario"
+        | "usuario_creado"
+        | "usuario_actualizado"
+        | "usuario_eliminado"
+        | "configuracion_actualizada"
       app_role: "administrador" | "vendedor" | "cliente"
     }
     CompositeTypes: {
@@ -202,6 +255,18 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      action_type: [
+        "venta_creada",
+        "venta_cancelada",
+        "producto_creado",
+        "producto_actualizado",
+        "producto_eliminado",
+        "ajuste_inventario",
+        "usuario_creado",
+        "usuario_actualizado",
+        "usuario_eliminado",
+        "configuracion_actualizada",
+      ],
       app_role: ["administrador", "vendedor", "cliente"],
     },
   },

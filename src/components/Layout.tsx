@@ -6,7 +6,8 @@ import {
   Package, 
   BarChart3,
   Settings,
-  Users
+  Users,
+  FileText
 } from "lucide-react";
 
 export const Layout = () => {
@@ -18,6 +19,7 @@ export const Layout = () => {
     { icon: Package, label: "Productos", path: "/products" },
     { icon: BarChart3, label: "Inventario", path: "/inventory" },
     { icon: Users, label: "Clientes", path: "/customers" },
+    { icon: FileText, label: "Auditoría", path: "/audit" },
     { icon: Settings, label: "Configuración", path: "/settings" },
   ];
 
