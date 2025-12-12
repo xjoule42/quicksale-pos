@@ -25,6 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { ImageIcon } from "lucide-react";
 
 const productSchema = z.object({
   name: z.string().min(1, "El nombre es requerido").max(100),
@@ -33,6 +35,7 @@ const productSchema = z.object({
   stock: z.coerce.number().int().min(0, "El stock debe ser mayor o igual a 0"),
   sku: z.string().min(1, "El SKU es requerido").max(50),
   description: z.string().max(500).optional(),
+  image_url: z.string().url("URL inválida").optional().or(z.literal("")),
 });
 
 export type ProductFormData = z.infer<typeof productSchema>;
@@ -63,6 +66,7 @@ export const ProductDialog = ({
       stock: 0,
       sku: "",
       description: "",
+      image_url: "",
       ...defaultValues,
     },
   });
@@ -76,6 +80,7 @@ export const ProductDialog = ({
         stock: 0,
         sku: "",
         description: "",
+        image_url: "",
         ...defaultValues,
       });
     }
@@ -86,9 +91,11 @@ export const ProductDialog = ({
     onOpenChange(false);
   };
 
+  const imageUrl = form.watch("image_url");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Editar Producto" : "Nuevo Producto"}
@@ -174,6 +181,53 @@ export const ProductDialog = ({
                 )}
               />
             </div>
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Descripción (opcional)</FormLabel>
+                  <FormControl>
+                    <Textarea 
+                      placeholder="Descripción del producto" 
+                      className="resize-none"
+                      {...field} 
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="image_url"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>URL de Imagen (opcional)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="https://ejemplo.com/imagen.jpg" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                  {imageUrl && (
+                    <div className="mt-2 relative w-20 h-20 rounded-lg overflow-hidden border border-border">
+                      <img 
+                        src={imageUrl} 
+                        alt="Vista previa" 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
+                  {!imageUrl && (
+                    <div className="mt-2 w-20 h-20 rounded-lg border border-dashed border-border flex items-center justify-center bg-muted/50">
+                      <ImageIcon className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                  )}
+                </FormItem>
+              )}
+            />
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancelar
