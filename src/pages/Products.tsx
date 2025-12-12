@@ -1,34 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Package as PackageIcon } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Package as PackageIcon, Loader2 } from "lucide-react";
 import { useAuditLog } from "@/hooks/useAuditLog";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { ProductDialog, ProductFormData } from "@/components/ProductDialog";
 
 interface Product {
-  id: number;
+  id: string;
   name: string;
   category: string;
   price: number;
   stock: number;
   sku: string;
+  description?: string | null;
 }
 
-const initialProducts: Product[] = [
-  { id: 1, name: "Café Americano", category: "Bebidas", price: 3.50, stock: 150, sku: "BEB-001" },
-  { id: 2, name: "Croissant", category: "Panadería", price: 2.80, stock: 80, sku: "PAN-001" },
-  { id: 3, name: "Jugo Natural", category: "Bebidas", price: 4.20, stock: 60, sku: "BEB-002" },
-  { id: 4, name: "Sandwich Mixto", category: "Comida", price: 5.50, stock: 45, sku: "COM-001" },
-  { id: 5, name: "Té Verde", category: "Bebidas", price: 2.90, stock: 120, sku: "BEB-003" },
-  { id: 6, name: "Ensalada César", category: "Comida", price: 7.80, stock: 30, sku: "COM-002" },
-];
-
 const Products = () => {
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const { logAction } = useAuditLog();
   const [searchTerm, setSearchTerm] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+
+  const fetchProducts = async () => {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .order("name");
+
+    if (error) {
+      console.error("Error fetching products:", error);
+      toast.error("Error al cargar productos");
+      return;
+    }
+
+    setProducts(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
 
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -41,49 +58,121 @@ const Products = () => {
     return <Badge variant="destructive">Stock Bajo</Badge>;
   };
 
-  const handleCreateProduct = async () => {
-    const newProduct: Product = {
-      id: Date.now(),
-      name: "Nuevo Producto",
-      category: "Sin categoría",
-      price: 0,
-      stock: 0,
-      sku: `SKU-${Date.now()}`,
-    };
+  const handleCreateProduct = async (data: ProductFormData) => {
+    const { data: newProduct, error } = await supabase
+      .from("products")
+      .insert({
+        name: data.name,
+        category: data.category,
+        price: data.price,
+        stock: data.stock,
+        sku: data.sku,
+        description: data.description || null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating product:", error);
+      toast.error("Error al crear producto");
+      return;
+    }
+
     setProducts([...products, newProduct]);
     await logAction({
       actionType: "producto_creado",
       tableName: "products",
-      recordId: String(newProduct.id),
+      recordId: newProduct.id,
       newValues: newProduct,
       description: `Producto "${newProduct.name}" creado`,
     });
     toast.success("Producto creado");
   };
 
-  const handleEditProduct = async (product: Product) => {
+  const handleEditProduct = async (data: ProductFormData) => {
+    if (!editingProduct) return;
+
+    const { data: updatedProduct, error } = await supabase
+      .from("products")
+      .update({
+        name: data.name,
+        category: data.category,
+        price: data.price,
+        stock: data.stock,
+        sku: data.sku,
+        description: data.description || null,
+      })
+      .eq("id", editingProduct.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error updating product:", error);
+      toast.error("Error al actualizar producto");
+      return;
+    }
+
+    setProducts(products.map(p => p.id === editingProduct.id ? updatedProduct : p));
     await logAction({
       actionType: "producto_actualizado",
       tableName: "products",
-      recordId: String(product.id),
-      oldValues: product,
-      newValues: product,
-      description: `Producto "${product.name}" editado`,
+      recordId: updatedProduct.id,
+      oldValues: editingProduct,
+      newValues: updatedProduct,
+      description: `Producto "${updatedProduct.name}" actualizado`,
     });
-    toast.info("Edición registrada en auditoría");
+    toast.success("Producto actualizado");
+    setEditingProduct(null);
   };
 
   const handleDeleteProduct = async (product: Product) => {
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", product.id);
+
+    if (error) {
+      console.error("Error deleting product:", error);
+      toast.error("Error al eliminar producto");
+      return;
+    }
+
     setProducts(products.filter(p => p.id !== product.id));
     await logAction({
       actionType: "producto_eliminado",
       tableName: "products",
-      recordId: String(product.id),
+      recordId: product.id,
       oldValues: product,
       description: `Producto "${product.name}" eliminado`,
     });
     toast.success("Producto eliminado");
   };
+
+  const openEditDialog = (product: Product) => {
+    setEditingProduct(product);
+    setDialogOpen(true);
+  };
+
+  const openCreateDialog = () => {
+    setEditingProduct(null);
+    setDialogOpen(true);
+  };
+
+  const handleDialogSubmit = (data: ProductFormData) => {
+    if (editingProduct) {
+      handleEditProduct(data);
+    } else {
+      handleCreateProduct(data);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -92,7 +181,7 @@ const Products = () => {
           <h1 className="text-4xl font-bold text-foreground mb-2">Productos</h1>
           <p className="text-muted-foreground">Gestiona tu catálogo de productos</p>
         </div>
-        <Button className="gap-2" onClick={handleCreateProduct}>
+        <Button className="gap-2" onClick={openCreateDialog}>
           <Plus className="w-4 h-4" />
           Nuevo Producto
         </Button>
@@ -138,7 +227,7 @@ const Products = () => {
                     <Badge variant="outline">{product.category}</Badge>
                   </td>
                   <td className="py-4 px-4 text-right font-semibold text-primary">
-                    ${product.price.toFixed(2)}
+                    ${Number(product.price).toFixed(2)}
                   </td>
                   <td className="py-4 px-4 text-right font-medium">{product.stock}</td>
                   <td className="py-4 px-4 text-center">
@@ -146,7 +235,7 @@ const Products = () => {
                   </td>
                   <td className="py-4 px-4">
                     <div className="flex items-center justify-end gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => handleEditProduct(product)}>
+                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(product)}>
                         <Edit className="w-4 h-4" />
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => handleDeleteProduct(product)}>
@@ -160,6 +249,21 @@ const Products = () => {
           </table>
         </div>
       </Card>
+
+      <ProductDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onSubmit={handleDialogSubmit}
+        defaultValues={editingProduct ? {
+          name: editingProduct.name,
+          category: editingProduct.category,
+          price: editingProduct.price,
+          stock: editingProduct.stock,
+          sku: editingProduct.sku,
+          description: editingProduct.description || "",
+        } : undefined}
+        isEditing={!!editingProduct}
+      />
     </div>
   );
 };
