@@ -1,14 +1,47 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { StatCard } from "@/components/StatCard";
 import { Package, AlertTriangle, TrendingDown, Archive } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useAuditLog } from "@/hooks/useAuditLog";
+import { toast } from "sonner";
+
+interface LowStockItem {
+  name: string;
+  current: number;
+  min: number;
+  category: string;
+}
 
 const Inventory = () => {
-  const lowStockItems = [
+  const { logAction } = useAuditLog();
+  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([
     { name: "Ensalada César", current: 30, min: 50, category: "Comida" },
     { name: "Sandwich Mixto", current: 45, min: 60, category: "Comida" },
     { name: "Jugo Natural", current: 60, min: 80, category: "Bebidas" },
-  ];
+  ]);
+
+  const handleAdjustStock = async (item: LowStockItem, adjustment: number) => {
+    const oldValue = item.current;
+    const newValue = item.current + adjustment;
+    
+    setLowStockItems(items =>
+      items.map(i =>
+        i.name === item.name ? { ...i, current: newValue } : i
+      )
+    );
+
+    await logAction({
+      actionType: "ajuste_inventario",
+      tableName: "inventory",
+      oldValues: { stock: oldValue },
+      newValues: { stock: newValue },
+      description: `Ajuste de inventario para "${item.name}": ${oldValue} → ${newValue} (${adjustment > 0 ? '+' : ''}${adjustment})`,
+    });
+    
+    toast.success(`Stock de ${item.name} ajustado`);
+  };
 
   return (
     <div className="space-y-6">
@@ -63,6 +96,14 @@ const Inventory = () => {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Stock mínimo:</span>
                   <span className="font-medium">{item.min} unidades</span>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 10)}>
+                    +10 Stock
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 50)}>
+                    +50 Stock
+                  </Button>
                 </div>
               </div>
             ))}
