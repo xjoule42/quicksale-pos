@@ -56,6 +56,86 @@ export type Database = {
         }
         Relationships: []
       }
+      customers: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          email: string | null
+          id: string
+          last_purchase_at: string | null
+          name: string
+          phone: string | null
+          total_purchases: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          id?: string
+          last_purchase_at?: string | null
+          name: string
+          phone?: string | null
+          total_purchases?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          id?: string
+          last_purchase_at?: string | null
+          name?: string
+          phone?: string | null
+          total_purchases?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      inventory_movements: {
+        Row: {
+          created_at: string
+          id: string
+          movement_type: string
+          new_stock: number
+          notes: string | null
+          previous_stock: number
+          product_id: string | null
+          quantity: number
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          movement_type: string
+          new_stock: number
+          notes?: string | null
+          previous_stock: number
+          product_id?: string | null
+          quantity: number
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          movement_type?: string
+          new_stock?: number
+          notes?: string | null
+          previous_stock?: number
+          product_id?: string | null
+          quantity?: number
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           category: string
@@ -63,6 +143,7 @@ export type Database = {
           created_by: string | null
           description: string | null
           id: string
+          image_url: string | null
           name: string
           price: number
           sku: string
@@ -75,6 +156,7 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          image_url?: string | null
           name: string
           price?: number
           sku: string
@@ -87,6 +169,7 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          image_url?: string | null
           name?: string
           price?: number
           sku?: string
@@ -116,6 +199,63 @@ export type Database = {
           full_name?: string | null
           id?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      settings: {
+        Row: {
+          address: string | null
+          business_name: string | null
+          created_at: string
+          daily_reports: boolean | null
+          email: string | null
+          id: string
+          low_stock_alerts: boolean | null
+          payment_card: boolean | null
+          payment_cash: boolean | null
+          payment_transfer: boolean | null
+          phone: string | null
+          printer_enabled: boolean | null
+          rfc: string | null
+          scanner_enabled: boolean | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          address?: string | null
+          business_name?: string | null
+          created_at?: string
+          daily_reports?: boolean | null
+          email?: string | null
+          id?: string
+          low_stock_alerts?: boolean | null
+          payment_card?: boolean | null
+          payment_cash?: boolean | null
+          payment_transfer?: boolean | null
+          phone?: string | null
+          printer_enabled?: boolean | null
+          rfc?: string | null
+          scanner_enabled?: boolean | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          address?: string | null
+          business_name?: string | null
+          created_at?: string
+          daily_reports?: boolean | null
+          email?: string | null
+          id?: string
+          low_stock_alerts?: boolean | null
+          payment_card?: boolean | null
+          payment_cash?: boolean | null
+          payment_transfer?: boolean | null
+          phone?: string | null
+          printer_enabled?: boolean | null
+          rfc?: string | null
+          scanner_enabled?: boolean | null
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }

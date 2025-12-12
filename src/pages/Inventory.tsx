@@ -1,47 +1,130 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { StatCard } from "@/components/StatCard";
 import { Package, AlertTriangle, TrendingDown, Archive } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuditLog } from "@/hooks/useAuditLog";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
 
-interface LowStockItem {
+interface Product {
+  id: string;
   name: string;
-  current: number;
-  min: number;
+  stock: number;
+  price: number;
   category: string;
 }
 
+interface InventoryMovement {
+  id: string;
+  product_id: string;
+  movement_type: string;
+  quantity: number;
+  created_at: string;
+  products?: { name: string } | null;
+}
+
+const MIN_STOCK_THRESHOLD = 50;
+
 const Inventory = () => {
   const { logAction } = useAuditLog();
-  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([
-    { name: "Ensalada César", current: 30, min: 50, category: "Comida" },
-    { name: "Sandwich Mixto", current: 45, min: 60, category: "Comida" },
-    { name: "Jugo Natural", current: 60, min: 80, category: "Bebidas" },
-  ]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleAdjustStock = async (item: LowStockItem, adjustment: number) => {
-    const oldValue = item.current;
-    const newValue = item.current + adjustment;
-    
-    setLowStockItems(items =>
-      items.map(i =>
-        i.name === item.name ? { ...i, current: newValue } : i
-      )
-    );
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-    await logAction({
-      actionType: "ajuste_inventario",
-      tableName: "inventory",
-      oldValues: { stock: oldValue },
-      newValues: { stock: newValue },
-      description: `Ajuste de inventario para "${item.name}": ${oldValue} → ${newValue} (${adjustment > 0 ? '+' : ''}${adjustment})`,
-    });
-    
-    toast.success(`Stock de ${item.name} ajustado`);
+  const fetchData = async () => {
+    try {
+      const [productsRes, movementsRes] = await Promise.all([
+        supabase.from("products").select("*").order("stock", { ascending: true }),
+        supabase
+          .from("inventory_movements")
+          .select("*, products(name)")
+          .order("created_at", { ascending: false })
+          .limit(10),
+      ]);
+
+      if (productsRes.error) throw productsRes.error;
+      if (movementsRes.error) throw movementsRes.error;
+
+      setProducts(productsRes.data || []);
+      setMovements(movementsRes.data || []);
+    } catch (error) {
+      console.error("Error fetching inventory data:", error);
+      toast.error("Error al cargar datos de inventario");
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const lowStockItems = products.filter(p => p.stock < MIN_STOCK_THRESHOLD && p.stock > 0);
+  const outOfStockItems = products.filter(p => p.stock === 0);
+  const totalValue = products.reduce((sum, p) => sum + p.stock * p.price, 0);
+
+  const handleAdjustStock = async (product: Product, adjustment: number) => {
+    const oldValue = product.stock;
+    const newValue = Math.max(0, product.stock + adjustment);
+
+    try {
+      const { error: updateError } = await supabase
+        .from("products")
+        .update({ stock: newValue })
+        .eq("id", product.id);
+
+      if (updateError) throw updateError;
+
+      const { error: movementError } = await supabase
+        .from("inventory_movements")
+        .insert({
+          product_id: product.id,
+          movement_type: adjustment > 0 ? "entrada" : "ajuste",
+          quantity: adjustment,
+          previous_stock: oldValue,
+          new_stock: newValue,
+          notes: `Ajuste manual: ${adjustment > 0 ? "+" : ""}${adjustment}`,
+        });
+
+      if (movementError) throw movementError;
+
+      await logAction({
+        actionType: "ajuste_inventario",
+        tableName: "products",
+        recordId: product.id,
+        oldValues: { stock: oldValue },
+        newValues: { stock: newValue },
+        description: `Ajuste de inventario para "${product.name}": ${oldValue} → ${newValue}`,
+      });
+
+      toast.success(`Stock de ${product.name} ajustado`);
+      fetchData();
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      toast.error("Error al ajustar stock");
+    }
+  };
+
+  const getMovementLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      entrada: "Entrada",
+      salida: "Salida",
+      ajuste: "Ajuste",
+    };
+    return labels[type] || type;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-muted-foreground">Cargando inventario...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -53,22 +136,22 @@ const Inventory = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Productos"
-          value="1,234"
+          value={products.length.toString()}
           icon={Package}
         />
         <StatCard
           title="Bajo Stock"
-          value="12"
+          value={lowStockItems.length.toString()}
           icon={AlertTriangle}
         />
         <StatCard
           title="Sin Stock"
-          value="3"
+          value={outOfStockItems.length.toString()}
           icon={TrendingDown}
         />
         <StatCard
           title="Valor Total"
-          value="$45,890"
+          value={`$${totalValue.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`}
           icon={Archive}
         />
       </div>
@@ -79,65 +162,75 @@ const Inventory = () => {
             <AlertTriangle className="w-5 h-5 text-warning" />
             Productos con Stock Bajo
           </h3>
-          <div className="space-y-4">
-            {lowStockItems.map((item, i) => (
-              <div key={i} className="p-4 bg-warning/10 border border-warning/30 rounded-lg">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <p className="font-semibold text-foreground">{item.name}</p>
-                    <Badge variant="outline" className="mt-1">{item.category}</Badge>
+          <div className="space-y-4 max-h-[400px] overflow-y-auto">
+            {lowStockItems.length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">
+                No hay productos con stock bajo
+              </p>
+            ) : (
+              lowStockItems.map((item) => (
+                <div key={item.id} className="p-4 bg-warning/10 border border-warning/30 rounded-lg">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="font-semibold text-foreground">{item.name}</p>
+                      <Badge variant="outline" className="mt-1">{item.category}</Badge>
+                    </div>
+                    <Badge variant="destructive">¡Alerta!</Badge>
                   </div>
-                  <Badge variant="destructive">¡Alerta!</Badge>
+                  <div className="flex items-center justify-between text-sm mt-3">
+                    <span className="text-muted-foreground">Stock actual:</span>
+                    <span className="font-bold text-warning">{item.stock} unidades</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Stock mínimo:</span>
+                    <span className="font-medium">{MIN_STOCK_THRESHOLD} unidades</span>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 10)}>
+                      +10 Stock
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 50)}>
+                      +50 Stock
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-sm mt-3">
-                  <span className="text-muted-foreground">Stock actual:</span>
-                  <span className="font-bold text-warning">{item.current} unidades</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Stock mínimo:</span>
-                  <span className="font-medium">{item.min} unidades</span>
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 10)}>
-                    +10 Stock
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 50)}>
-                    +50 Stock
-                  </Button>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </Card>
 
         <Card className="p-6 shadow-soft">
           <h3 className="text-xl font-bold text-foreground mb-4">Movimientos Recientes</h3>
-          <div className="space-y-4">
-            {[
-              { type: "Entrada", product: "Café Americano", qty: 100, date: "Hoy, 10:30 AM" },
-              { type: "Salida", product: "Croissant", qty: -25, date: "Hoy, 09:15 AM" },
-              { type: "Entrada", product: "Té Verde", qty: 50, date: "Ayer, 04:20 PM" },
-              { type: "Ajuste", product: "Jugo Natural", qty: -5, date: "Ayer, 02:10 PM" },
-              { type: "Entrada", product: "Sandwich Mixto", qty: 40, date: "Ayer, 11:00 AM" },
-            ].map((movement, i) => (
-              <div key={i} className="flex items-center justify-between py-3 border-b border-border last:border-0">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Badge 
-                      variant={movement.type === "Entrada" ? "secondary" : "outline"}
-                      className={movement.type === "Entrada" ? "bg-success/20 text-success border-success/30" : ""}
-                    >
-                      {movement.type}
-                    </Badge>
-                    <span className="font-medium text-foreground">{movement.product}</span>
+          <div className="space-y-4 max-h-[400px] overflow-y-auto">
+            {movements.length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">
+                No hay movimientos registrados
+              </p>
+            ) : (
+              movements.map((movement) => (
+                <div key={movement.id} className="flex items-center justify-between py-3 border-b border-border last:border-0">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge 
+                        variant={movement.movement_type === "entrada" ? "secondary" : "outline"}
+                        className={movement.movement_type === "entrada" ? "bg-success/20 text-success border-success/30" : ""}
+                      >
+                        {getMovementLabel(movement.movement_type)}
+                      </Badge>
+                      <span className="font-medium text-foreground">
+                        {movement.products?.name || "Producto desconocido"}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {format(new Date(movement.created_at), "dd/MM/yyyy HH:mm", { locale: es })}
+                    </p>
                   </div>
-                  <p className="text-sm text-muted-foreground">{movement.date}</p>
+                  <span className={`font-bold text-lg ${movement.quantity > 0 ? 'text-success' : 'text-destructive'}`}>
+                    {movement.quantity > 0 ? '+' : ''}{movement.quantity}
+                  </span>
                 </div>
-                <span className={`font-bold text-lg ${movement.qty > 0 ? 'text-success' : 'text-destructive'}`}>
-                  {movement.qty > 0 ? '+' : ''}{movement.qty}
-                </span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </Card>
       </div>

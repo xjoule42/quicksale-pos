@@ -3,11 +3,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Package as PackageIcon, Loader2 } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Package as PackageIcon, Loader2, Upload } from "lucide-react";
 import { useAuditLog } from "@/hooks/useAuditLog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { ProductDialog, ProductFormData } from "@/components/ProductDialog";
+import { CSVImportDialog, CSVProduct } from "@/components/CSVImportDialog";
 
 interface Product {
   id: string;
@@ -17,6 +18,7 @@ interface Product {
   stock: number;
   sku: string;
   description?: string | null;
+  image_url?: string | null;
 }
 
 const Products = () => {
@@ -25,6 +27,7 @@ const Products = () => {
   const { logAction } = useAuditLog();
   const [searchTerm, setSearchTerm] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [csvDialogOpen, setCSVDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const fetchProducts = async () => {
@@ -68,6 +71,7 @@ const Products = () => {
         stock: data.stock,
         sku: data.sku,
         description: data.description || null,
+        image_url: data.image_url || null,
       })
       .select()
       .single();
@@ -101,6 +105,7 @@ const Products = () => {
         stock: data.stock,
         sku: data.sku,
         description: data.description || null,
+        image_url: data.image_url || null,
       })
       .eq("id", editingProduct.id)
       .select()
@@ -148,6 +153,35 @@ const Products = () => {
     toast.success("Producto eliminado");
   };
 
+  const handleCSVImport = async (csvProducts: CSVProduct[]) => {
+    const { data, error } = await supabase
+      .from("products")
+      .insert(
+        csvProducts.map(p => ({
+          name: p.name,
+          category: p.category,
+          price: p.price,
+          stock: p.stock,
+          sku: p.sku,
+          description: p.description || null,
+        }))
+      )
+      .select();
+
+    if (error) {
+      console.error("Error importing products:", error);
+      throw error;
+    }
+
+    await logAction({
+      actionType: "producto_creado",
+      tableName: "products",
+      description: `${csvProducts.length} productos importados desde CSV`,
+    });
+
+    fetchProducts();
+  };
+
   const openEditDialog = (product: Product) => {
     setEditingProduct(product);
     setDialogOpen(true);
@@ -181,10 +215,16 @@ const Products = () => {
           <h1 className="text-4xl font-bold text-foreground mb-2">Productos</h1>
           <p className="text-muted-foreground">Gestiona tu catálogo de productos</p>
         </div>
-        <Button className="gap-2" onClick={openCreateDialog}>
-          <Plus className="w-4 h-4" />
-          Nuevo Producto
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="gap-2" onClick={() => setCSVDialogOpen(true)}>
+            <Upload className="w-4 h-4" />
+            Importar CSV
+          </Button>
+          <Button className="gap-2" onClick={openCreateDialog}>
+            <Plus className="w-4 h-4" />
+            Nuevo Producto
+          </Button>
+        </div>
       </div>
 
       <Card className="p-6 shadow-soft">
@@ -216,9 +256,17 @@ const Products = () => {
                 <tr key={product.id} className="border-b border-border hover:bg-muted/50 transition-smooth">
                   <td className="py-4 px-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center">
-                        <PackageIcon className="w-5 h-5 text-accent-foreground" />
-                      </div>
+                      {product.image_url ? (
+                        <img
+                          src={product.image_url}
+                          alt={product.name}
+                          className="w-10 h-10 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center">
+                          <PackageIcon className="w-5 h-5 text-accent-foreground" />
+                        </div>
+                      )}
                       <span className="font-medium text-foreground">{product.name}</span>
                     </div>
                   </td>
@@ -261,8 +309,15 @@ const Products = () => {
           stock: editingProduct.stock,
           sku: editingProduct.sku,
           description: editingProduct.description || "",
+          image_url: editingProduct.image_url || "",
         } : undefined}
         isEditing={!!editingProduct}
+      />
+
+      <CSVImportDialog
+        open={csvDialogOpen}
+        onOpenChange={setCSVDialogOpen}
+        onImport={handleCSVImport}
       />
     </div>
   );
