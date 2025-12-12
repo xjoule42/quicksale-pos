@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus, Edit, Trash2, Package as PackageIcon } from "lucide-react";
+import { useAuditLog } from "@/hooks/useAuditLog";
+import { toast } from "sonner";
 
 interface Product {
   id: number;
@@ -24,7 +26,8 @@ const initialProducts: Product[] = [
 ];
 
 const Products = () => {
-  const [products] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const { logAction } = useAuditLog();
   const [searchTerm, setSearchTerm] = useState("");
 
   const filteredProducts = products.filter(p =>
@@ -38,6 +41,50 @@ const Products = () => {
     return <Badge variant="destructive">Stock Bajo</Badge>;
   };
 
+  const handleCreateProduct = async () => {
+    const newProduct: Product = {
+      id: Date.now(),
+      name: "Nuevo Producto",
+      category: "Sin categoría",
+      price: 0,
+      stock: 0,
+      sku: `SKU-${Date.now()}`,
+    };
+    setProducts([...products, newProduct]);
+    await logAction({
+      actionType: "producto_creado",
+      tableName: "products",
+      recordId: String(newProduct.id),
+      newValues: newProduct,
+      description: `Producto "${newProduct.name}" creado`,
+    });
+    toast.success("Producto creado");
+  };
+
+  const handleEditProduct = async (product: Product) => {
+    await logAction({
+      actionType: "producto_actualizado",
+      tableName: "products",
+      recordId: String(product.id),
+      oldValues: product,
+      newValues: product,
+      description: `Producto "${product.name}" editado`,
+    });
+    toast.info("Edición registrada en auditoría");
+  };
+
+  const handleDeleteProduct = async (product: Product) => {
+    setProducts(products.filter(p => p.id !== product.id));
+    await logAction({
+      actionType: "producto_eliminado",
+      tableName: "products",
+      recordId: String(product.id),
+      oldValues: product,
+      description: `Producto "${product.name}" eliminado`,
+    });
+    toast.success("Producto eliminado");
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -45,7 +92,7 @@ const Products = () => {
           <h1 className="text-4xl font-bold text-foreground mb-2">Productos</h1>
           <p className="text-muted-foreground">Gestiona tu catálogo de productos</p>
         </div>
-        <Button className="gap-2">
+        <Button className="gap-2" onClick={handleCreateProduct}>
           <Plus className="w-4 h-4" />
           Nuevo Producto
         </Button>
@@ -99,10 +146,10 @@ const Products = () => {
                   </td>
                   <td className="py-4 px-4">
                     <div className="flex items-center justify-end gap-2">
-                      <Button variant="ghost" size="icon">
+                      <Button variant="ghost" size="icon" onClick={() => handleEditProduct(product)}>
                         <Edit className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="icon">
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteProduct(product)}>
                         <Trash2 className="w-4 h-4 text-destructive" />
                       </Button>
                     </div>

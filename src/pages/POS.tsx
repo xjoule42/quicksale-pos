@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Barcode, Trash2, Plus, Minus, Package } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useAuditLog } from "@/hooks/useAuditLog";
+import { toast } from "sonner";
 
 interface CartItem {
   id: number;
@@ -24,6 +26,7 @@ const products = [
 
 const POS = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
+  const { logAction } = useAuditLog();
   const [searchTerm, setSearchTerm] = useState("");
 
   const addToCart = (product: typeof products[0]) => {
@@ -58,6 +61,26 @@ const POS = () => {
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleCheckout = async () => {
+    const saleData = {
+      items: cart,
+      subtotal: total,
+      tax: total * 0.16,
+      total: total * 1.16,
+      timestamp: new Date().toISOString(),
+    };
+    
+    await logAction({
+      actionType: "venta_creada",
+      tableName: "sales",
+      newValues: saleData,
+      description: `Venta realizada por $${(total * 1.16).toFixed(2)} con ${cart.length} productos`,
+    });
+    
+    setCart([]);
+    toast.success("Venta registrada exitosamente");
+  };
 
   return (
     <div className="h-[calc(100vh-4rem)]">
@@ -163,6 +186,7 @@ const POS = () => {
             <Button 
               className="w-full h-12 text-lg font-semibold" 
               disabled={cart.length === 0}
+              onClick={handleCheckout}
             >
               Cobrar
             </Button>
