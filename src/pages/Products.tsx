@@ -9,6 +9,9 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { ProductDialog, ProductFormData } from "@/components/ProductDialog";
 import { CSVImportDialog, CSVProduct } from "@/components/CSVImportDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyProducts, EmptySearch } from "@/components/EmptyState";
+import { LoadingButton } from "@/components/LoadingButton";
 
 interface Product {
   id: string;
@@ -24,11 +27,14 @@ interface Product {
 const Products = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { logAction } = useAuditLog();
   const [searchTerm, setSearchTerm] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [csvDialogOpen, setCSVDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
 
   const fetchProducts = async () => {
     const { data, error } = await supabase
@@ -58,99 +64,162 @@ const Products = () => {
   const getStockBadge = (stock: number) => {
     if (stock > 100) return <Badge className="bg-success">Alto Stock</Badge>;
     if (stock > 30) return <Badge variant="secondary">Stock Normal</Badge>;
-    return <Badge variant="destructive">Stock Bajo</Badge>;
+    if (stock > 0) return <Badge className="bg-warning text-warning-foreground">Stock Bajo</Badge>;
+    return <Badge variant="destructive">Sin Stock</Badge>;
   };
 
   const handleCreateProduct = async (data: ProductFormData) => {
-    const { data: newProduct, error } = await supabase
-      .from("products")
-      .insert({
-        name: data.name,
-        category: data.category,
-        price: data.price,
-        stock: data.stock,
-        sku: data.sku,
-        description: data.description || null,
-        image_url: data.image_url || null,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error creating product:", error);
-      toast.error("Error al crear producto");
+    // Validations
+    if (!data.name.trim()) {
+      toast.error("El nombre del producto es obligatorio");
+      return;
+    }
+    if (data.price <= 0) {
+      toast.error("El precio debe ser mayor a 0");
+      return;
+    }
+    if (data.stock < 0) {
+      toast.error("El stock no puede ser negativo");
       return;
     }
 
-    setProducts([...products, newProduct]);
-    await logAction({
-      actionType: "producto_creado",
-      tableName: "products",
-      recordId: newProduct.id,
-      newValues: newProduct,
-      description: `Producto "${newProduct.name}" creado`,
-    });
-    toast.success("Producto creado");
+    // Check for duplicate SKU
+    const existingProduct = products.find(p => p.sku.toLowerCase() === data.sku.toLowerCase());
+    if (existingProduct) {
+      toast.error("Ya existe un producto con ese SKU");
+      return;
+    }
+
+    setActionLoading("create");
+    try {
+      const { data: newProduct, error } = await supabase
+        .from("products")
+        .insert({
+          name: data.name.trim(),
+          category: data.category,
+          price: data.price,
+          stock: data.stock,
+          sku: data.sku.trim(),
+          description: data.description?.trim() || null,
+          image_url: data.image_url?.trim() || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setProducts([...products, newProduct]);
+      await logAction({
+        actionType: "producto_creado",
+        tableName: "products",
+        recordId: newProduct.id,
+        newValues: newProduct,
+        description: `Producto "${newProduct.name}" creado`,
+      });
+      toast.success("Producto creado exitosamente");
+      setDialogOpen(false);
+    } catch (error) {
+      console.error("Error creating product:", error);
+      toast.error("Error al crear producto");
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleEditProduct = async (data: ProductFormData) => {
     if (!editingProduct) return;
 
-    const { data: updatedProduct, error } = await supabase
-      .from("products")
-      .update({
-        name: data.name,
-        category: data.category,
-        price: data.price,
-        stock: data.stock,
-        sku: data.sku,
-        description: data.description || null,
-        image_url: data.image_url || null,
-      })
-      .eq("id", editingProduct.id)
-      .select()
-      .single();
+    // Validations
+    if (!data.name.trim()) {
+      toast.error("El nombre del producto es obligatorio");
+      return;
+    }
+    if (data.price <= 0) {
+      toast.error("El precio debe ser mayor a 0");
+      return;
+    }
+    if (data.stock < 0) {
+      toast.error("El stock no puede ser negativo");
+      return;
+    }
 
-    if (error) {
+    // Check for duplicate SKU (excluding current product)
+    const existingProduct = products.find(
+      p => p.sku.toLowerCase() === data.sku.toLowerCase() && p.id !== editingProduct.id
+    );
+    if (existingProduct) {
+      toast.error("Ya existe otro producto con ese SKU");
+      return;
+    }
+
+    setActionLoading("edit");
+    try {
+      const { data: updatedProduct, error } = await supabase
+        .from("products")
+        .update({
+          name: data.name.trim(),
+          category: data.category,
+          price: data.price,
+          stock: data.stock,
+          sku: data.sku.trim(),
+          description: data.description?.trim() || null,
+          image_url: data.image_url?.trim() || null,
+        })
+        .eq("id", editingProduct.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setProducts(products.map(p => p.id === editingProduct.id ? updatedProduct : p));
+      await logAction({
+        actionType: "producto_actualizado",
+        tableName: "products",
+        recordId: updatedProduct.id,
+        oldValues: editingProduct,
+        newValues: updatedProduct,
+        description: `Producto "${updatedProduct.name}" actualizado`,
+      });
+      toast.success("Producto actualizado exitosamente");
+      setEditingProduct(null);
+      setDialogOpen(false);
+    } catch (error) {
       console.error("Error updating product:", error);
       toast.error("Error al actualizar producto");
-      return;
+    } finally {
+      setActionLoading(null);
     }
-
-    setProducts(products.map(p => p.id === editingProduct.id ? updatedProduct : p));
-    await logAction({
-      actionType: "producto_actualizado",
-      tableName: "products",
-      recordId: updatedProduct.id,
-      oldValues: editingProduct,
-      newValues: updatedProduct,
-      description: `Producto "${updatedProduct.name}" actualizado`,
-    });
-    toast.success("Producto actualizado");
-    setEditingProduct(null);
   };
 
-  const handleDeleteProduct = async (product: Product) => {
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("id", product.id);
+  const handleDeleteProduct = async () => {
+    if (!productToDelete) return;
 
-    if (error) {
+    setActionLoading("delete");
+    try {
+      const { error } = await supabase
+        .from("products")
+        .delete()
+        .eq("id", productToDelete.id);
+
+      if (error) throw error;
+
+      setProducts(products.filter(p => p.id !== productToDelete.id));
+      await logAction({
+        actionType: "producto_eliminado",
+        tableName: "products",
+        recordId: productToDelete.id,
+        oldValues: productToDelete,
+        description: `Producto "${productToDelete.name}" eliminado`,
+      });
+      toast.success("Producto eliminado exitosamente");
+      setProductToDelete(null);
+      setDeleteDialogOpen(false);
+    } catch (error) {
       console.error("Error deleting product:", error);
       toast.error("Error al eliminar producto");
-      return;
+    } finally {
+      setActionLoading(null);
     }
-
-    setProducts(products.filter(p => p.id !== product.id));
-    await logAction({
-      actionType: "producto_eliminado",
-      tableName: "products",
-      recordId: product.id,
-      oldValues: product,
-      description: `Producto "${product.name}" eliminado`,
-    });
-    toast.success("Producto eliminado");
   };
 
   const handleCSVImport = async (csvProducts: CSVProduct[]) => {
@@ -158,12 +227,12 @@ const Products = () => {
       .from("products")
       .insert(
         csvProducts.map(p => ({
-          name: p.name,
+          name: p.name.trim(),
           category: p.category,
           price: p.price,
           stock: p.stock,
-          sku: p.sku,
-          description: p.description || null,
+          sku: p.sku.trim(),
+          description: p.description?.trim() || null,
         }))
       )
       .select();
@@ -190,6 +259,11 @@ const Products = () => {
   const openCreateDialog = () => {
     setEditingProduct(null);
     setDialogOpen(true);
+  };
+
+  const openDeleteDialog = (product: Product) => {
+    setProductToDelete(product);
+    setDeleteDialogOpen(true);
   };
 
   const handleDialogSubmit = (data: ProductFormData) => {
@@ -238,69 +312,90 @@ const Products = () => {
           />
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left py-3 px-4 font-semibold text-foreground">Producto</th>
-                <th className="text-left py-3 px-4 font-semibold text-foreground">SKU</th>
-                <th className="text-left py-3 px-4 font-semibold text-foreground">Categoría</th>
-                <th className="text-right py-3 px-4 font-semibold text-foreground">Precio</th>
-                <th className="text-right py-3 px-4 font-semibold text-foreground">Stock</th>
-                <th className="text-center py-3 px-4 font-semibold text-foreground">Estado</th>
-                <th className="text-right py-3 px-4 font-semibold text-foreground">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((product) => (
-                <tr key={product.id} className="border-b border-border hover:bg-muted/50 transition-smooth">
-                  <td className="py-4 px-4">
-                    <div className="flex items-center gap-3">
-                      {product.image_url ? (
-                        <img
-                          src={product.image_url}
-                          alt={product.name}
-                          className="w-10 h-10 rounded-lg object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center">
-                          <PackageIcon className="w-5 h-5 text-accent-foreground" />
-                        </div>
-                      )}
-                      <span className="font-medium text-foreground">{product.name}</span>
-                    </div>
-                  </td>
-                  <td className="py-4 px-4 text-muted-foreground">{product.sku}</td>
-                  <td className="py-4 px-4">
-                    <Badge variant="outline">{product.category}</Badge>
-                  </td>
-                  <td className="py-4 px-4 text-right font-semibold text-primary">
-                    ${Number(product.price).toFixed(2)}
-                  </td>
-                  <td className="py-4 px-4 text-right font-medium">{product.stock}</td>
-                  <td className="py-4 px-4 text-center">
-                    {getStockBadge(product.stock)}
-                  </td>
-                  <td className="py-4 px-4">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(product)}>
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteProduct(product)}>
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </td>
+        {products.length === 0 ? (
+          <EmptyProducts onAction={openCreateDialog} />
+        ) : filteredProducts.length === 0 && searchTerm ? (
+          <EmptySearch term={searchTerm} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-3 px-4 font-semibold text-foreground">Producto</th>
+                  <th className="text-left py-3 px-4 font-semibold text-foreground">SKU</th>
+                  <th className="text-left py-3 px-4 font-semibold text-foreground">Categoría</th>
+                  <th className="text-right py-3 px-4 font-semibold text-foreground">Precio</th>
+                  <th className="text-right py-3 px-4 font-semibold text-foreground">Stock</th>
+                  <th className="text-center py-3 px-4 font-semibold text-foreground">Estado</th>
+                  <th className="text-right py-3 px-4 font-semibold text-foreground">Acciones</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredProducts.map((product) => (
+                  <tr key={product.id} className="border-b border-border hover:bg-muted/50 transition-smooth">
+                    <td className="py-4 px-4">
+                      <div className="flex items-center gap-3">
+                        {product.image_url ? (
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-10 h-10 rounded-lg object-cover"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center">
+                            <PackageIcon className="w-5 h-5 text-accent-foreground" />
+                          </div>
+                        )}
+                        <span className="font-medium text-foreground">{product.name}</span>
+                      </div>
+                    </td>
+                    <td className="py-4 px-4 text-muted-foreground">{product.sku}</td>
+                    <td className="py-4 px-4">
+                      <Badge variant="outline">{product.category}</Badge>
+                    </td>
+                    <td className="py-4 px-4 text-right font-semibold text-primary">
+                      ${Number(product.price).toFixed(2)}
+                    </td>
+                    <td className="py-4 px-4 text-right font-medium">{product.stock}</td>
+                    <td className="py-4 px-4 text-center">
+                      {getStockBadge(product.stock)}
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => openEditDialog(product)}
+                          disabled={actionLoading !== null}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => openDeleteDialog(product)}
+                          disabled={actionLoading !== null}
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       <ProductDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          if (!actionLoading) {
+            setDialogOpen(open);
+            if (!open) setEditingProduct(null);
+          }
+        }}
         onSubmit={handleDialogSubmit}
         defaultValues={editingProduct ? {
           name: editingProduct.name,
@@ -318,6 +413,17 @@ const Products = () => {
         open={csvDialogOpen}
         onOpenChange={setCSVDialogOpen}
         onImport={handleCSVImport}
+      />
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="¿Eliminar producto?"
+        description={`Esta acción no se puede deshacer. Se eliminará permanentemente el producto "${productToDelete?.name}".`}
+        confirmLabel="Eliminar"
+        onConfirm={handleDeleteProduct}
+        variant="destructive"
+        loading={actionLoading === "delete"}
       />
     </div>
   );
