@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { StatCard } from "@/components/StatCard";
-import { Package, AlertTriangle, TrendingDown, Archive } from "lucide-react";
+import { Package, AlertTriangle, TrendingDown, Archive, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuditLog } from "@/hooks/useAuditLog";
@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
 
 interface Product {
   id: string;
@@ -34,6 +36,12 @@ const Inventory = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [adjustDialogOpen, setAdjustDialogOpen] = useState(false);
+  const [adjustLoading, setAdjustLoading] = useState(false);
+  const [pendingAdjustment, setPendingAdjustment] = useState<{
+    product: Product;
+    adjustment: number;
+  } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -67,10 +75,23 @@ const Inventory = () => {
   const outOfStockItems = products.filter(p => p.stock === 0);
   const totalValue = products.reduce((sum, p) => sum + p.stock * p.price, 0);
 
-  const handleAdjustStock = async (product: Product, adjustment: number) => {
+  const requestAdjustStock = (product: Product, adjustment: number) => {
+    if (adjustment < 0 && Math.abs(adjustment) > product.stock) {
+      toast.error(`No se puede reducir más de ${product.stock} unidades`);
+      return;
+    }
+    setPendingAdjustment({ product, adjustment });
+    setAdjustDialogOpen(true);
+  };
+
+  const handleAdjustStock = async () => {
+    if (!pendingAdjustment) return;
+
+    const { product, adjustment } = pendingAdjustment;
     const oldValue = product.stock;
     const newValue = Math.max(0, product.stock + adjustment);
 
+    setAdjustLoading(true);
     try {
       const { error: updateError } = await supabase
         .from("products")
@@ -101,11 +122,15 @@ const Inventory = () => {
         description: `Ajuste de inventario para "${product.name}": ${oldValue} → ${newValue}`,
       });
 
-      toast.success(`Stock de ${product.name} ajustado`);
+      toast.success(`Stock de ${product.name} ajustado: ${oldValue} → ${newValue}`);
+      setAdjustDialogOpen(false);
+      setPendingAdjustment(null);
       fetchData();
     } catch (error) {
       console.error("Error adjusting stock:", error);
       toast.error("Error al ajustar stock");
+    } finally {
+      setAdjustLoading(false);
     }
   };
 
@@ -121,7 +146,10 @@ const Inventory = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-muted-foreground">Cargando inventario...</p>
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+          <p className="text-muted-foreground">Cargando inventario...</p>
+        </div>
       </div>
     );
   }
@@ -164,9 +192,12 @@ const Inventory = () => {
           </h3>
           <div className="space-y-4 max-h-[400px] overflow-y-auto">
             {lowStockItems.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">
-                No hay productos con stock bajo
-              </p>
+              <EmptyState
+                icon={Package}
+                title="Sin alertas de stock"
+                description="Todos los productos tienen stock suficiente."
+                className="py-8"
+              />
             ) : (
               lowStockItems.map((item) => (
                 <div key={item.id} className="p-4 bg-warning/10 border border-warning/30 rounded-lg">
@@ -186,10 +217,20 @@ const Inventory = () => {
                     <span className="font-medium">{MIN_STOCK_THRESHOLD} unidades</span>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 10)}>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => requestAdjustStock(item, 10)}
+                      disabled={adjustLoading}
+                    >
                       +10 Stock
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleAdjustStock(item, 50)}>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => requestAdjustStock(item, 50)}
+                      disabled={adjustLoading}
+                    >
                       +50 Stock
                     </Button>
                   </div>
@@ -203,9 +244,12 @@ const Inventory = () => {
           <h3 className="text-xl font-bold text-foreground mb-4">Movimientos Recientes</h3>
           <div className="space-y-4 max-h-[400px] overflow-y-auto">
             {movements.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">
-                No hay movimientos registrados
-              </p>
+              <EmptyState
+                icon={Archive}
+                title="Sin movimientos"
+                description="No hay movimientos de inventario registrados aún."
+                className="py-8"
+              />
             ) : (
               movements.map((movement) => (
                 <div key={movement.id} className="flex items-center justify-between py-3 border-b border-border last:border-0">
@@ -234,6 +278,25 @@ const Inventory = () => {
           </div>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={adjustDialogOpen}
+        onOpenChange={(open) => {
+          if (!adjustLoading) {
+            setAdjustDialogOpen(open);
+            if (!open) setPendingAdjustment(null);
+          }
+        }}
+        title="Confirmar ajuste de stock"
+        description={
+          pendingAdjustment
+            ? `¿Deseas ajustar el stock de "${pendingAdjustment.product.name}" de ${pendingAdjustment.product.stock} a ${pendingAdjustment.product.stock + pendingAdjustment.adjustment} unidades?`
+            : ""
+        }
+        confirmLabel="Confirmar ajuste"
+        onConfirm={handleAdjustStock}
+        loading={adjustLoading}
+      />
     </div>
   );
 };
